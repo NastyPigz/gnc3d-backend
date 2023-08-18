@@ -201,6 +201,7 @@ dependencies = [
  "hyper",
  "tokio",
  "tokio-tungstenite",
+ "url",
 ]
 
 [[package]]
