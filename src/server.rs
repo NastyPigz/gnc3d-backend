@@ -32,20 +32,36 @@ use crate::session;
 // the room HOST will spawn the cakes and send the positions over.
 // the room 
 
-
+#[derive(Clone)]
 pub struct Player {
+    pub addr: SocketAddr,
     pub sender: Tx,
     pub username: String,
+    // false = woman, true = man, no biases here I swear!!!
+    pub sex: bool
 }
 
 pub type Tx = UnboundedSender<Message>;
+// although SocketAddr is unique (even if localhost)
+// using Uuid is probably better...
 pub type PeerMap = Arc<Mutex<HashMap<SocketAddr, Player>>>;
+// Vec<Player> should be the best since it contains three times information... also don't think we should use references
+// Cannot use HashSet... although I don't think the same player can join twice
+
+// TODO: who should be the ghost? random pick?
+pub struct Room {
+    pub seed: usize,
+    // more game settings
+    pub players: Vec<Player>
+}
+pub type RoomMap = Arc<Mutex<HashMap<String, Room>>>;
 
 
 pub async fn handle_request(
     peer_map: PeerMap,
     mut req: Request<Body>,
     addr: SocketAddr,
+    rooms: RoomMap
 ) -> Result<Response<Body>, Infallible> {
     println!("Received a new, potentially ws handshake");
     println!("The request's path is: {}", req.uri().path());
@@ -83,17 +99,22 @@ pub async fn handle_request(
     }
     // println!("{:?}", req.uri());
     // println!("{:?}", req.uri().query());
+    // Dumbass lib, have to concat smh. I cannot get full url otherwise
+    println!("{:?}", ("https://example.org".to_string() + &req.uri().to_string()));
     let queries = Url::parse(&("https://example.org".to_string() + &req.uri().to_string()))
         .expect("Failed to parse URI")
         .query_pairs()
-        .filter_map(|(k, v)| {
-            let name = k.into_owned();
-            if name == "username" {
-                Some((name, v.into_owned()))
-            } else {
-                None
-            }
+        .map(|(k, v)| {
+            (k.into(), v.into_owned())
         })
+        // .filter_map(|(k, v)| {
+        //     let name = k.into_owned();
+        //     if name == "username" {
+        //         Some((name, v.into_owned()))
+        //     } else {
+        //         None
+        //     }
+        // })
         .collect::<HashMap<String, String>>();
     // let username =  match req.uri().query() {
     //     Some(query) if query.starts_with("username") => {
@@ -101,36 +122,52 @@ pub async fn handle_request(
     //     },
     //     _ => "balls_eater".to_string(),
     // };
-    println!("{:?}", queries["username"]);
+    // println!("{:?}", queries.get("username"));
+    println!("{:?}", queries);
+    // println!("{:?}", queries.get("room"));
     let ver = req.version();
-    tokio::task::spawn(async move {
-        match hyper::upgrade::on(&mut req).await {
-            Ok(upgraded) => {
-                // session::handle_connection(
-                //     peer_map,
-                //     WebSocketStream::from_raw_socket(upgraded, Role::Server, None).await,
-                //     addr,
-                //     queries.get("username").unwrap_or(&"balls_eater".to_string()).to_string()
-                // )
-                // .await;
-                let game_session = session::GameSession {
-                    peer_map,
-                    addr,
-                    username: queries.get("username").unwrap_or(&"balls_eater".to_string()).to_string()
-                };
-                game_session.start(WebSocketStream::from_raw_socket(upgraded, Role::Server, None).await).await;
+    if let Some(room) = queries.get("room") {
+        // kinda dumb that I have to do this
+        let room = room.to_string();
+        tokio::task::spawn(async move {
+            match hyper::upgrade::on(&mut req).await {
+                Ok(upgraded) => {
+                    // session::handle_connection(
+                    //     peer_map,
+                    //     WebSocketStream::from_raw_socket(upgraded, Role::Server, None).await,
+                    //     addr,
+                    //     queries.get("username").unwrap_or(&"balls_eater".to_string()).to_string()
+                    // )
+                    // .await;
+                    let game_session = session::GameSession {
+                        peer_map,
+                        rooms,
+                        addr,
+                        username: queries.get("username").unwrap_or(&"balls_eater".to_string()).to_string(),
+                        sex: *queries.get("sex").unwrap_or(&"false".to_string()) != "false",
+                        seed: (*queries.get("seed").unwrap_or(&"0".to_string())).parse().unwrap_or(0),
+                        room: room.clone()
+                    };
+                    game_session.start(WebSocketStream::from_raw_socket(upgraded, Role::Server, None).await).await;
+                }
+                Err(e) => println!("upgrade error: {}", e),
             }
-            Err(e) => println!("upgrade error: {}", e),
-        }
-    });
-    let mut res = Response::new(Body::empty());
-    *res.status_mut() = StatusCode::SWITCHING_PROTOCOLS;
-    *res.version_mut() = ver;
-    res.headers_mut().append(CONNECTION, upgrade);
-    res.headers_mut().append(UPGRADE, websocket);
-    res.headers_mut().append(SEC_WEBSOCKET_ACCEPT, derived.unwrap().parse().unwrap());
-    // Let's add an additional header to our response to the client.
-    // res.headers_mut().append("MyCustomHeader", ":)".parse().unwrap());
-    // res.headers_mut().append("SOME_TUNGSTENITE_HEADER", "header_value".parse().unwrap());
-    Ok(res)
+        });
+        let mut res = Response::new(Body::empty());
+        *res.status_mut() = StatusCode::SWITCHING_PROTOCOLS;
+        *res.version_mut() = ver;
+        res.headers_mut().append(CONNECTION, upgrade);
+        res.headers_mut().append(UPGRADE, websocket);
+        res.headers_mut().append(SEC_WEBSOCKET_ACCEPT, derived.unwrap().parse().unwrap());
+        // Let's add an additional header to our response to the client.
+        // res.headers_mut().append("MyCustomHeader", ":)".parse().unwrap());
+        // res.headers_mut().append("SOME_TUNGSTENITE_HEADER", "header_value".parse().unwrap());
+        Ok(res)
+    } else {
+        let mut res = Response::new(Body::empty());
+        *res.status_mut() = StatusCode::BAD_REQUEST;
+        *res.version_mut() = ver;
+        // how do I specify close code??
+        Ok(res)
+    }
 }
