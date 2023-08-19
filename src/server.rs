@@ -38,7 +38,9 @@ pub struct Player {
     pub sender: Tx,
     pub username: String,
     // false = woman, true = man, no biases here I swear!!!
-    pub sex: bool
+    pub sex: bool,
+    // hard limit max room size 255, fps will probably crash before this is hit
+    pub id: u8
 }
 
 pub type Tx = UnboundedSender<Message>;
@@ -139,14 +141,16 @@ pub async fn handle_request(
                     //     queries.get("username").unwrap_or(&"balls_eater".to_string()).to_string()
                     // )
                     // .await;
-                    let game_session = session::GameSession {
+                    let mut game_session = session::GameSession {
                         peer_map,
                         rooms,
                         addr,
                         username: queries.get("username").unwrap_or(&"balls_eater".to_string()).to_string(),
                         sex: *queries.get("sex").unwrap_or(&"false".to_string()) != "false",
                         seed: (*queries.get("seed").unwrap_or(&"0".to_string())).parse().unwrap_or(0),
-                        room: room.clone()
+                        room: room.clone(),
+                        // id will be calculated
+                        id: None
                     };
                     game_session.start(WebSocketStream::from_raw_socket(upgraded, Role::Server, None).await).await;
                 }

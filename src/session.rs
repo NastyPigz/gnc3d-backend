@@ -35,7 +35,8 @@ pub struct GameSession {
     pub username: String,
     pub sex: bool,
     pub seed: usize,
-    pub room: String
+    pub room: String,
+    pub id: Option<u8>
 }
 
 // modern problems require modern solutions
@@ -49,38 +50,90 @@ impl GameSession {
 
     async fn recv(&self, msg: Message) -> Result<(), Error> {
         // let peers = self.peer_map.lock().await;
+        // println!("Receiving");
         let mut rooms = self.rooms.lock().await;
+        // println!("Ok(rooms)");
 
-        let broadcast_recipients = rooms.entry(self.room.clone()).or_insert(server::Room {
-            seed: self.seed,
-            players: Vec::new()
-        });
-            // peers.iter().filter(|(peer_addr, _)| peer_addr != &&self.addr).map(|(_, player)| player);
-
-        for recp in broadcast_recipients.players.iter() {
-            // println!("{}", recp.username);
-            // do not send to self
-            if recp.addr != self.addr {
-                // this is a peer functionality...
-                recp.sender.unbounded_send(msg.clone()).unwrap();
+        if let Some(room) = rooms.remove(&self.room.clone()) {
+            let mut results = Vec::new();
+            println!("Room has players {}", room.players.len());
+            for recp in room.players {
+                if recp.addr != self.addr {
+                    println!("{}", recp.username);
+                    // this is a peer functionality...
+                    // if the client sent a string, other endpoints will NOT be happy.
+                    let mut v = msg.clone().into_data();
+                    if v.len() == 44 {
+                        // this shit too so long to debug, JS ws uses little endian
+                        let bytes = (self.id.unwrap() as f32).to_le_bytes();
+                        v.insert(4, bytes[0]);
+                        v.insert(5, bytes[1]);
+                        v.insert(6, bytes[2]);
+                        v.insert(7, bytes[3]);
+                    } else {
+                        v.insert(1, self.id.unwrap());
+                    }
+                    // results.push(recp.sender.unbounded_send(Message::Binary(v)));
+                    // let res = session.session.text(serde_json::to_string(&msg).unwrap()).await;
+                    results.push(
+                        recp.sender.unbounded_send(Message::Binary(v)).map(|_| recp)
+                            .map_err(|_| println!("Dropping session")),
+                    );
+                } else {
+                    results.push(Ok(recp));
+                }
             }
+            rooms.insert(self.room.clone(), server::Room {
+                seed: room.seed,
+                players: results.into_iter().filter_map(|i| i.ok()).collect()
+            });
         }
+
+        // let broadcast_recipients = rooms.entry(self.room.clone()).or_insert(server::Room {
+        //     seed: self.seed,
+        //     players: Vec::new()
+        // });
+        //     // peers.iter().filter(|(peer_addr, _)| peer_addr != &&self.addr).map(|(_, player)| player);
+
+        // let mut results = Vec::new();
+        // for recp in broadcast_recipients.players.iter() {
+        //     // println!("{}", recp.username);
+        //     // do not send to self
+        //     if recp.addr != self.addr {
+        //         // this is a peer functionality...
+        //         // if the client sent a string, other endpoints will NOT be happy.
+        //         let mut v = msg.clone().into_data();
+        //         v.insert(1, self.id.unwrap());
+        //         results.push(recp.sender.unbounded_send(Message::Binary(v)));
+        //     }
+        // }
+        
         Ok(())
     }
 
-    pub async fn start(&self, ws_stream: WebSocketStream<Upgraded>) {
+    // had to do this... self.id cannot be assigned otherwise
+    pub async fn start(&mut self, ws_stream: WebSocketStream<Upgraded>) {
         println!("WebSocket connection established: {}", self.addr);
 
         // Insert the write part of this peer to the peer map.
         // tx = send, rx = receive
         let (tx, rx) = unbounded();
+        let room_name = self.room.clone();
+        let room_lck = self.rooms.lock().await;
+
+        let id: u8 = if room_lck.get(&room_name).is_some() {
+            room_lck.len() as u8
+        } else { 0 };
+
+        drop(room_lck);
         
         let mut plock = self.peer_map.lock().await;
         let player = server::Player {
             sender: tx.clone(),
             username: self.username.clone(),
             sex: self.sex,
-            addr: self.addr
+            addr: self.addr,
+            id
         };
         plock.insert(self.addr, player.clone());
 
@@ -88,15 +141,19 @@ impl GameSession {
 
         let mut rooms = self.rooms.lock().await;
         // keep in mind that the first player is the host.
-        let room_name = self.room.clone();
         let entry = if let Some(room) = rooms.get_mut(&room_name) {
             // if room already exists then we completely ignore the seed value
             println!("Just adding");
+            // count starts from 0...
+            self.id = Some(room.players.len() as u8);
             room.players.push(player.clone());
             room
         } else {
             // 69 means the client is the host and he is supposed to send in the cake coords
             println!("New");
+            // 69 also means the player id is 0
+            self.id = Some(0);
+            // if this errors then the GameSession might as well close and not do anything
             tx.unbounded_send(Message::Binary(vec![69])).unwrap();
             rooms.entry(room_name).or_insert(server::Room {
                 seed: self.seed,
@@ -110,23 +167,32 @@ impl GameSession {
         //     .or_insert_with(Vec::new);
 
         // entry.push(player);
+        
+        // from this point on self.id is definitely Some(u8)
     
-        let mut v = vec![PLAYER_JOIN];
+        let mut v = vec![PLAYER_JOIN, self.id.unwrap()];
 
         v.extend_from_slice(self.username.as_bytes());
 
         // send everyone in the room our current information
-        for recp in entry.players.iter() {
+        // let mut results = Vec::new();
+        for recp in entry.players.clone().into_iter() {
             if recp.addr == self.addr {
                 continue;
             }
-            let mut v2 = vec![PLAYER_JOIN];
+            let mut v2 = vec![PLAYER_JOIN, recp.id];
             v2.extend_from_slice(recp.username.as_bytes());
-            // send each user OUR username
             recp.sender.unbounded_send(Message::Binary(v.clone())).unwrap();
+            // send each user OUR username
+            // results.push(
+            //     recp.sender.unbounded_send(Message::Binary(v.clone())).map(|_| recp)
+            //         .map_err(|_| println!("Dropping session")),
+            // );
             // send client each user's username
             tx.unbounded_send(Message::Binary(v2)).unwrap();
         }
+        // entry.players = results.into_iter().filter_map(|i| i.ok()).collect();
+        // entry.players.push(player);
 
         // for recp in plock.iter().filter(|(peer_addr, _)| peer_addr != &&self.addr).map(|(_, player)| player) {
         //     let mut v2 = vec![PLAYER_JOIN];
@@ -182,6 +248,7 @@ impl GameSession {
             // println!("Before removal: {}", room.players.len());
             room.players.retain(|p| {
                 // println!("Addr: {}, {}, eq: {}", p.addr, self.addr, p.addr == self.addr);
+                // probably better than using id
                 p.addr != self.addr
             });
             // println!("Before removal: {}", room.players.len());
