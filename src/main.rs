@@ -22,7 +22,8 @@ async fn main() -> Result<(), hyper::Error> {
     let state = server::PeerMap::new(Mutex::new(HashMap::new()));
     let rooms = server::RoomMap::new(Mutex::new(HashMap::new()));
 
-    let addr = "127.0.0.1:8080".to_string().parse().unwrap();
+    // let addr = "127.0.0.1:8080".to_string().parse().unwrap();
+    let addr = "0.0.0.0:443".to_string().parse().unwrap();
 
     let make_svc = make_service_fn(move |conn: &AddrStream| {
         let remote_addr = conn.remote_addr();

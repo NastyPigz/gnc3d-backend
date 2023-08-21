@@ -32,7 +32,7 @@ use crate::session;
 // the room HOST will spawn the cakes and send the positions over.
 // the room 
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Player {
     pub addr: SocketAddr,
     pub sender: Tx,
@@ -65,6 +65,12 @@ pub async fn handle_request(
     addr: SocketAddr,
     rooms: RoomMap
 ) -> Result<Response<Body>, Infallible> {
+    if req.uri() == "/healthz" {
+        let mut res = Response::new(Body::empty());
+        *res.status_mut() = StatusCode::OK;
+        *res.version_mut() = req.version();
+        return Ok(res);
+    }
     println!("Received a new, potentially ws handshake");
     println!("The request's path is: {}", req.uri().path());
     println!("The request's headers are:");
