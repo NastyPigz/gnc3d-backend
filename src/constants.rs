@@ -1,0 +1,9 @@
+pub const USER_DATA_EVENT: u8 = 0;
+// pub const USER_STATE_UPDATE: u8 = 1;
+// pub const DIED_OF_DEATH: u8 = 2;
+pub const CAKE_SPAWN_EVENT: u8 = 3;
+// pub const CAKE_COLLIDE_EVENT: u8 = 4;
+// pub const PLAYER_LEAVE_EVENT: u8 = 5;
+// pub const CAKES_UPDATE_EVENT: u8 = 6;
+// pub const GERMINATION_EVENT: u8 = 42;
+// pub const IS_HOST_EVENT: u8 = 69;

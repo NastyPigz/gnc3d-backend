@@ -16,20 +16,10 @@ use tokio_tungstenite::{
     WebSocketStream,
 };
 
-use crate::server;
-
-// serversent events
-const PLAYER_JOIN: u8 = 0;
-// const TEST: f32 = 0.032400325;
-// these won't be used since this is basically a peer server
-// but here are the specifications:
-// const VELOCITY_UPDATE: u8 = 1;
-// const POSITION_UPDATE: u8 = 2;
-// const ACTION_UPDATE: u8 = 3;
-/* Rotation can be calculated using velocity */
+use crate::{server, constants::{USER_DATA_EVENT, CAKE_SPAWN_EVENT}};
 
 pub struct GameSession {
-    pub peer_map: server::PeerMap,
+    // pub peer_map: server::PeerMap,
     pub rooms: server::RoomMap,
     pub addr: SocketAddr,
     pub username: String,
@@ -65,17 +55,34 @@ impl GameSession {
                         // maybe we can utilize Message::Text
                         Message::Text(_) => results.push(Ok(recp)),
                         Message::Binary(_) => {
+                            // because matching msg.clone() probably takes more time
                             let mut v = msg.clone().into_data();
                             if v.is_empty() {
                                 // this shouldn't happen but it will crazily error if it is the case
+                                // we are gonna assume this guy is disconnected and deleting him from players list
                                 continue;
-                            } else if v.len() == 4*11 || v.len() == 4*9 || v.len() == 4*2 {
+                            }
+                            if v.len() == 4*11 || v.len() == 4*9 || v.len() == 4*2 {
                                 // this shit too so long to debug, JS ws uses little endian
                                 let bytes = (self.id.unwrap() as f32).to_le_bytes();
                                 v.insert(4, bytes[0]);
                                 v.insert(5, bytes[1]);
                                 v.insert(6, bytes[2]);
                                 v.insert(7, bytes[3]);
+                            } else if v.len() == 4*10 {
+                                let user_id = f32::from_le_bytes([v[4], v[5], v[6], v[7]]) as u8;
+                                if recp.id == user_id {
+                                    let mut new_v: Vec<u8> = Vec::new();
+                                    new_v.extend_from_slice(&(CAKE_SPAWN_EVENT as f32).to_le_bytes());
+                                    new_v.extend_from_slice(&(self.id.unwrap() as f32).to_le_bytes());
+                                    // from 9th and beyond are cake data
+                                    new_v.extend_from_slice(&v[8..]);
+                                    results.push(
+                                        recp.sender.unbounded_send(Message::Binary(new_v)).map(|_| recp)
+                                            .map_err(|_| println!("Dropping session!")),
+                                    );
+                                    continue;
+                                }
                             } else {
                                 v.insert(1, self.id.unwrap());
                             }
@@ -145,7 +152,7 @@ impl GameSession {
 
         drop(room_lck);
         
-        let mut plock = self.peer_map.lock().await;
+        // let mut plock = self.peer_map.lock().await;
         let player = server::Player {
             sender: tx.clone(),
             username: self.username.clone(),
@@ -153,7 +160,7 @@ impl GameSession {
             addr: self.addr,
             id
         };
-        plock.insert(self.addr, player.clone());
+        // plock.insert(self.addr, player.clone());
 
         // drop(plock);
 
@@ -200,7 +207,7 @@ impl GameSession {
                 continue;
             }
             // v2.extend_from_slice(recp.username.as_bytes());
-            recp.sender.unbounded_send(Message::Binary(vec![PLAYER_JOIN, self.id.unwrap(), self.sex as u8])).unwrap();
+            recp.sender.unbounded_send(Message::Binary(vec![USER_DATA_EVENT, self.id.unwrap(), self.sex as u8])).unwrap();
             recp.sender.unbounded_send(Message::Text(self.id.unwrap().to_string() + &self.username)).unwrap();
             // send each user OUR username
             // results.push(
@@ -208,7 +215,7 @@ impl GameSession {
             //         .map_err(|_| println!("Dropping session")),
             // );
             // send client each user's id, sex, then username
-            tx.unbounded_send(Message::Binary(vec![PLAYER_JOIN, recp.id, recp.sex as u8])).unwrap();
+            tx.unbounded_send(Message::Binary(vec![USER_DATA_EVENT, recp.id, recp.sex as u8])).unwrap();
             tx.unbounded_send(Message::Text(recp.id.to_string() + &recp.username)).unwrap();
         }
         // entry.players = results.into_iter().filter_map(|i| i.ok()).collect();
@@ -223,7 +230,7 @@ impl GameSession {
         //     tx.unbounded_send(Message::Binary(v2)).unwrap();
         // }
     
-        drop(plock);
+        // drop(plock);
         drop(rooms);
     
         let (outgoing, incoming) = ws_stream.split();
@@ -261,7 +268,7 @@ impl GameSession {
     pub async fn disonnect(&self) {
         // super scuffed code
         println!("{} disconnected", &self.addr);
-        self.peer_map.lock().await.remove(&self.addr);
+        // self.peer_map.lock().await.remove(&self.addr);
         let mut rooms = self.rooms.lock().await;
 
         if self.id.unwrap() == 0 {
@@ -276,7 +283,6 @@ impl GameSession {
                     // }
                 }
             }
-            self.peer_map.lock().await.remove(&self.addr);
             return
         }
 

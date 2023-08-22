@@ -45,12 +45,12 @@ pub struct Player {
 
 pub type Tx = UnboundedSender<Message>;
 // although SocketAddr is unique (even if localhost)
-// using Uuid is probably better...
-pub type PeerMap = Arc<Mutex<HashMap<SocketAddr, Player>>>;
+// peer map is useless
+// pub type PeerMap = Arc<Mutex<HashMap<SocketAddr, Player>>>;
 // Vec<Player> should be the best since it contains three times information... also don't think we should use references
 // Cannot use HashSet... although I don't think the same player can join twice
 
-// TODO: who should be the ghost? random pick?
+// TODO: host is ghost? Maybe random select?
 pub struct Room {
     pub seed: usize,
     // more game settings
@@ -60,11 +60,12 @@ pub type RoomMap = Arc<Mutex<HashMap<String, Room>>>;
 
 
 pub async fn handle_request(
-    peer_map: PeerMap,
+    // peer_map: PeerMap,
     mut req: Request<Body>,
     addr: SocketAddr,
     rooms: RoomMap
 ) -> Result<Response<Body>, Infallible> {
+    // health check stuff
     if req.uri() == "/healthz" {
         let mut res = Response::new(Body::empty());
         *res.status_mut() = StatusCode::OK;
@@ -148,7 +149,6 @@ pub async fn handle_request(
                     // )
                     // .await;
                     let mut game_session = session::GameSession {
-                        peer_map,
                         rooms,
                         addr,
                         username: queries.get("username").unwrap_or(&"balls_eater".to_string()).to_string(),
