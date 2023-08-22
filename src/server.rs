@@ -24,7 +24,7 @@ use tokio_tungstenite::{
     WebSocketStream,
 };
 
-use sysinfo::{System, SystemExt, CpuExt};
+use sysinfo::{System, SystemExt, ProcessExt};
 
 use tokio::sync::Mutex;
 use url::Url;
@@ -75,19 +75,27 @@ pub async fn handle_request(
         let mut system = System::new_all();
         system.refresh_all();
 
-        println!("=> disks:");
-        for disk in system.disks() {
-            println!("{:?}", disk);
+        if let Some(process) = system.process(sysinfo::get_current_pid().unwrap()) {
+            let memory = process.memory() / 1024; // Memory usage in KB
+            let cpu_usage = process.cpu_usage();
+            let disk_usage = process.disk_usage();
+
+            println!("Memory usage: {} KB | CPU usage: {}% | DISK usage: {}/{}", memory, cpu_usage, disk_usage.written_bytes, disk_usage.total_written_bytes);
         }
 
-        println!("total memory: {} bytes", system.total_memory());
-        println!("used memory : {} bytes", system.used_memory());
-        println!("total swap  : {} bytes", system.total_swap());
-        println!("used swap   : {} bytes", system.used_swap());
+        // println!("=> disks:");
+        // for disk in system.disks() {
+        //     println!("{:?}", disk);
+        // }
 
-        for cpu in system.cpus() {
-            print!("CPU USAGE: {}% ", cpu.cpu_usage());
-        }
+        // println!("total memory: {} bytes", system.total_memory());
+        // println!("used memory : {} bytes", system.used_memory());
+        // println!("total swap  : {} bytes", system.total_swap());
+        // println!("used swap   : {} bytes", system.used_swap());
+
+        // for cpu in system.cpus() {
+        //     print!("CPU USAGE: {}% ", cpu.cpu_usage());
+        // }
 
         return Ok(res);
     }
