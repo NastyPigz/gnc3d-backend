@@ -12,3 +12,4 @@ futures-util = { version = "0.3.28", default-features = false, features = ["sink
 futures-channel = "0.3.28"
 hyper = { version = "0.14.25", default-features = false, features = ["http1", "server", "tcp"] }
 url = "*"
+sysinfo = "0.29.8"

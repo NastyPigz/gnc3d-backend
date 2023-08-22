@@ -24,6 +24,8 @@ use tokio_tungstenite::{
     WebSocketStream,
 };
 
+use sysinfo::{System, SystemExt, CpuExt};
+
 use tokio::sync::Mutex;
 use url::Url;
 use crate::session;
@@ -70,6 +72,23 @@ pub async fn handle_request(
         let mut res = Response::new(Body::empty());
         *res.status_mut() = StatusCode::OK;
         *res.version_mut() = req.version();
+        let mut system = System::new_all();
+        system.refresh_all();
+
+        println!("=> disks:");
+        for disk in system.disks() {
+            println!("{:?}", disk);
+        }
+
+        println!("total memory: {} bytes", system.total_memory());
+        println!("used memory : {} bytes", system.used_memory());
+        println!("total swap  : {} bytes", system.total_swap());
+        println!("used swap   : {} bytes", system.used_swap());
+
+        for cpu in system.cpus() {
+            print!("CPU USAGE: {}% ", cpu.cpu_usage());
+        }
+
         return Ok(res);
     }
     println!("Received a new, potentially ws handshake");
