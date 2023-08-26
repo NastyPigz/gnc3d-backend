@@ -16,14 +16,14 @@ use tokio_tungstenite::{
     WebSocketStream,
 };
 
-use crate::{server, constants::{USER_DATA_EVENT, CAKE_SPAWN_EVENT}};
+use crate::{server, constants::{USER_DATA_EVENT, CAKE_SPAWN_EVENT, START_LOBBY_EVENT, TXT_MESSAGE_CREATE, USER_NAME_EVENT}};
 
 pub struct GameSession {
     // pub peer_map: server::PeerMap,
     pub rooms: server::RoomMap,
     pub addr: SocketAddr,
     pub username: String,
-    pub sex: bool,
+    pub skin: u8,
     pub seed: usize,
     pub room: String,
     pub id: Option<u8>
@@ -39,12 +39,14 @@ impl GameSession {
         // println!("Receiving");
         let mut rooms = self.rooms.lock().await;
         // println!("Ok(rooms)");
+        // println!("{:?}", msg);
 
-        // TODO: send seed and sex
         if let Some(room) = rooms.remove(&self.room.clone()) {
+            let mut started = room.started;
             let mut results = Vec::new();
             // println!("Room has players {}", room.players.len());
             for recp in room.players {
+                let mut v = msg.clone().into_data();
                 // println!("recp: {}, self: {}", recp.id, self.id.unwrap());
                 if recp.addr != self.addr {
                     // println!("{}", recp.username);
@@ -53,10 +55,29 @@ impl GameSession {
                     match msg {
                         // we have to do results.push(Ok(recp)) or else it will lead to undefined behaviour
                         // maybe we can utilize Message::Text
-                        Message::Text(_) => results.push(Ok(recp)),
+                        Message::Text(_) => {
+                            // hopefully nobody is trolling me and this panics
+                            let mut txt = msg.clone().into_text().unwrap();
+                            // text standard format:
+                            // event_code + message
+                            if let Some(c) = txt.chars().next() {
+                                // convert char to int moment
+                                if c as u16 - 48 == TXT_MESSAGE_CREATE {
+                                    // WHO NEEDS JSON WHEN YOU HAVE COMMAS?!?!
+                                    txt.insert_str(1, &(",".to_string() + &self.id.unwrap().to_string() + ","));
+                                    results.push(
+                                        recp.sender.unbounded_send(Message::Text(txt)).map(|_| recp)
+                                            .map_err(|_| println!("Dropping session!")),
+                                    );
+                                } else {
+                                    results.push(Ok(recp));
+                                }
+                            } else {
+                                results.push(Ok(recp));
+                            }
+                        },
                         Message::Binary(_) => {
                             // because matching msg.clone() probably takes more time
-                            let mut v = msg.clone().into_data();
                             if v.is_empty() {
                                 // this shouldn't happen but it will crazily error if it is the case
                                 // we are gonna assume this guy is disconnected and deleting him from players list
@@ -83,6 +104,8 @@ impl GameSession {
                                     );
                                     continue;
                                 }
+                            } else if v[0] == START_LOBBY_EVENT && self.id.unwrap() == 0 {
+                                started = true;
                             } else {
                                 v.insert(1, self.id.unwrap());
                             }
@@ -100,6 +123,12 @@ impl GameSession {
                         Message::Pong(_) => results.push(Ok(recp)),
                     }
 
+                } else if !v.is_empty() && v[0] == 7 {
+                    started = true;
+                    results.push(
+                        recp.sender.unbounded_send(msg.clone()).map(|_| recp)
+                            .map_err(|_| println!("Dropping session!")),
+                    );
                 } else {
                     results.push(Ok(recp));
                 }
@@ -110,6 +139,7 @@ impl GameSession {
             // println!("Hmm, {:?}", results);
             rooms.insert(self.room.clone(), server::Room {
                 seed: room.seed,
+                started,
                 players: results.into_iter().filter_map(|i| i.ok()).collect()
             });
         }
@@ -156,7 +186,7 @@ impl GameSession {
         let player = server::Player {
             sender: tx.clone(),
             username: self.username.clone(),
-            sex: self.sex,
+            skin: self.skin,
             addr: self.addr,
             id
         };
@@ -183,6 +213,7 @@ impl GameSession {
             // if this errors then the GameSession might as well close and not do anything
             tx.unbounded_send(Message::Binary(vec![69])).unwrap();
             rooms.entry(room_name).or_insert(server::Room {
+                started: false,
                 seed: self.seed,
                 players: vec![player.clone()]
             })
@@ -207,16 +238,16 @@ impl GameSession {
                 continue;
             }
             // v2.extend_from_slice(recp.username.as_bytes());
-            recp.sender.unbounded_send(Message::Binary(vec![USER_DATA_EVENT, self.id.unwrap(), self.sex as u8])).unwrap();
-            recp.sender.unbounded_send(Message::Text(self.id.unwrap().to_string() + &self.username)).unwrap();
+            recp.sender.unbounded_send(Message::Binary(vec![USER_DATA_EVENT, self.id.unwrap(), self.skin])).unwrap();
+            recp.sender.unbounded_send(Message::Text(USER_NAME_EVENT.to_string() + "," + &self.id.unwrap().to_string() + "," + &self.username)).unwrap();
             // send each user OUR username
             // results.push(
             //     recp.sender.unbounded_send(Message::Binary(v.clone())).map(|_| recp)
             //         .map_err(|_| println!("Dropping session")),
             // );
             // send client each user's id, sex, then username
-            tx.unbounded_send(Message::Binary(vec![USER_DATA_EVENT, recp.id, recp.sex as u8])).unwrap();
-            tx.unbounded_send(Message::Text(recp.id.to_string() + &recp.username)).unwrap();
+            tx.unbounded_send(Message::Binary(vec![USER_DATA_EVENT, recp.id, recp.skin])).unwrap();
+            tx.unbounded_send(Message::Text(USER_NAME_EVENT.to_string() + "," + &recp.id.to_string() + "," + &recp.username)).unwrap();
         }
         // entry.players = results.into_iter().filter_map(|i| i.ok()).collect();
         // entry.players.push(player);

@@ -39,8 +39,8 @@ pub struct Player {
     pub addr: SocketAddr,
     pub sender: Tx,
     pub username: String,
-    // false = woman, true = man, no biases here I swear!!!
-    pub sex: bool,
+    // 0 is male, 1 is female, 2 is Jamal
+    pub skin: u8,
     // hard limit max room size 255, fps will probably crash before this is hit
     pub id: u8
 }
@@ -52,9 +52,11 @@ pub type Tx = UnboundedSender<Message>;
 // Vec<Player> should be the best since it contains three times information... also don't think we should use references
 // Cannot use HashSet... although I don't think the same player can join twice
 
-// TODO: host is ghost? Maybe random select?
+// host is ghost atm
+#[derive(Debug)]
 pub struct Room {
     pub seed: usize,
+    pub started: bool,
     // more game settings
     pub players: Vec<Player>
 }
@@ -131,7 +133,7 @@ pub async fn handle_request(
         // || req.uri() != "/socket"
     /* \end{condition} */
     {
-        return Ok(Response::new(Body::from("Hello World!")));
+        return Ok(Response::new(Body::from("Yur version or browser is outdated innit bruv")));
     }
     // println!("{:?}", req.uri());
     // println!("{:?}", req.uri().query());
@@ -165,27 +167,33 @@ pub async fn handle_request(
     if let Some(room) = queries.get("room") {
         // kinda dumb that I have to do this
         let room = room.to_string();
+        let rooms_lock = rooms.lock().await;
+        if let Some(curr) = rooms_lock.get(&room) {
+            if curr.started {
+                let mut res = Response::new(Body::empty());
+                *res.status_mut() = StatusCode::BAD_REQUEST;
+                *res.version_mut() = ver;
+                // how do I specify close code??
+                return Ok(res);
+            }
+        }
+        drop(rooms_lock);
         tokio::task::spawn(async move {
             match hyper::upgrade::on(&mut req).await {
                 Ok(upgraded) => {
-                    // session::handle_connection(
-                    //     peer_map,
-                    //     WebSocketStream::from_raw_socket(upgraded, Role::Server, None).await,
-                    //     addr,
-                    //     queries.get("username").unwrap_or(&"balls_eater".to_string()).to_string()
-                    // )
-                    // .await;
                     let mut game_session = session::GameSession {
                         rooms,
                         addr,
                         username: queries.get("username").unwrap_or(&"balls_eater".to_string()).to_string(),
-                        sex: *queries.get("sex").unwrap_or(&"false".to_string()) != "false",
+                        skin: queries.get("skin").unwrap_or(&"0".to_string()).parse::<u8>().unwrap(),
                         seed: (*queries.get("seed").unwrap_or(&"0".to_string())).parse().unwrap_or(0),
                         room: room.clone(),
                         // id will be calculated
                         id: None
                     };
                     game_session.start(WebSocketStream::from_raw_socket(upgraded, Role::Server, None).await).await;
+                    // when the function finishes running, the game_session object
+                    // should automatically get dropped once out of scope
                 }
                 Err(e) => println!("upgrade error: {}", e),
             }
