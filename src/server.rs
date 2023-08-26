@@ -3,7 +3,7 @@ use std::{
     convert::Infallible,
     // env,
     net::SocketAddr,
-    sync::Arc
+    sync::Arc, borrow::Cow
 };
 
 use hyper::{
@@ -19,7 +19,7 @@ use futures_channel::mpsc::UnboundedSender;
 use tokio_tungstenite::{
     tungstenite::{
         handshake::derive_accept_key,
-        protocol::{Message, Role},
+        protocol::{Message, Role, CloseFrame, frame::coding::CloseCode},
     },
     WebSocketStream,
 };
@@ -170,10 +170,26 @@ pub async fn handle_request(
         let rooms_lock = rooms.lock().await;
         if let Some(curr) = rooms_lock.get(&room) {
             if curr.started {
+                tokio::task::spawn(async move {
+                    match hyper::upgrade::on(&mut req).await {
+                        Ok(upgraded) => {
+                            let mut ws = WebSocketStream::from_raw_socket(upgraded, Role::Server, None).await;
+                            ws.close(Some(CloseFrame {
+                                code: CloseCode::from(4001),
+                                reason: Cow::Owned("Room already started innit bruv".to_string())
+                            })).await.unwrap();
+                            // when the function finishes running, the game_session object
+                            // should automatically get dropped once out of scope
+                        }
+                        Err(e) => println!("upgrade error: {}", e),
+                    }
+                });
                 let mut res = Response::new(Body::empty());
-                *res.status_mut() = StatusCode::BAD_REQUEST;
+                *res.status_mut() = StatusCode::SWITCHING_PROTOCOLS;
                 *res.version_mut() = ver;
-                // how do I specify close code??
+                res.headers_mut().append(CONNECTION, upgrade);
+                res.headers_mut().append(UPGRADE, websocket);
+                res.headers_mut().append(SEC_WEBSOCKET_ACCEPT, derived.unwrap().parse().unwrap());
                 return Ok(res);
             }
         }
@@ -209,10 +225,31 @@ pub async fn handle_request(
         // res.headers_mut().append("SOME_TUNGSTENITE_HEADER", "header_value".parse().unwrap());
         Ok(res)
     } else {
+        // let mut res = Response::new(Body::empty());
+        // *res.status_mut() = StatusCode::BAD_REQUEST;
+        // *res.version_mut() = ver;
+        // // how do I specify close code??
+        // Ok(res)
+        tokio::task::spawn(async move {
+            match hyper::upgrade::on(&mut req).await {
+                Ok(upgraded) => {
+                    let mut ws = WebSocketStream::from_raw_socket(upgraded, Role::Server, None).await;
+                    ws.close(Some(CloseFrame {
+                        code: CloseCode::Invalid,
+                        reason: Cow::Owned("You're gay".to_string())
+                    })).await.unwrap();
+                    // when the function finishes running, the game_session object
+                    // should automatically get dropped once out of scope
+                }
+                Err(e) => println!("upgrade error: {}", e),
+            }
+        });
         let mut res = Response::new(Body::empty());
-        *res.status_mut() = StatusCode::BAD_REQUEST;
+        *res.status_mut() = StatusCode::SWITCHING_PROTOCOLS;
         *res.version_mut() = ver;
-        // how do I specify close code??
+        res.headers_mut().append(CONNECTION, upgrade);
+        res.headers_mut().append(UPGRADE, websocket);
+        res.headers_mut().append(SEC_WEBSOCKET_ACCEPT, derived.unwrap().parse().unwrap());
         Ok(res)
     }
 }
