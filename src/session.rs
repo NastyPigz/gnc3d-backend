@@ -60,18 +60,14 @@ impl GameSession {
                             let mut txt = msg.clone().into_text().unwrap();
                             // text standard format:
                             // event_code + message
-                            if let Some(c) = txt.chars().next() {
-                                // convert char to int moment
-                                if c as u16 - 48 == TXT_MESSAGE_CREATE {
-                                    // WHO NEEDS JSON WHEN YOU HAVE COMMAS?!?!
-                                    txt.insert_str(1, &(",".to_string() + &self.id.unwrap().to_string() + ","));
-                                    results.push(
-                                        recp.sender.unbounded_send(Message::Text(txt)).map(|_| recp)
-                                            .map_err(|_| println!("Dropping session!")),
-                                    );
-                                } else {
-                                    results.push(Ok(recp));
-                                }
+                            // note that both are std::option::Option
+                            if txt.chars().next() == char::from_digit(TXT_MESSAGE_CREATE.into(), 10) {
+                                // WHO NEEDS JSON WHEN YOU HAVE COMMAS?!?!
+                                txt.insert_str(1, &format!(",{},", self.id.unwrap()));
+                                results.push(
+                                    recp.sender.unbounded_send(Message::Text(txt)).map(|_| recp)
+                                        .map_err(|_| println!("Dropping session!")),
+                                );
                             } else {
                                 results.push(Ok(recp));
                             }
