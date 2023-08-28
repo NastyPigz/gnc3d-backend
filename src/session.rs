@@ -79,7 +79,7 @@ impl GameSession {
                                 // we are gonna assume this guy is disconnected and deleting him from players list
                                 continue;
                             }
-                            if v.len() == 4*11 || v.len() == 4*9 || v.len() == 4*2 {
+                            if v.len() == 4*11 || v.len() == 4*9 || v.len() == 4*2 || v.len() == 4*8 {
                                 // this shit too so long to debug, JS ws uses little endian
                                 let bytes = (self.id.unwrap() as f32).to_le_bytes();
                                 v.insert(4, bytes[0]);
