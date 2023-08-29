@@ -45,10 +45,12 @@ impl GameSession {
             let mut started = room.started;
             let mut results = Vec::new();
             // println!("Room has players {}", room.players.len());
+            // println!("Starting loop, length: {}", room.players.len());
             for recp in room.players {
+                // println!("{:?}", recp);
                 let mut v = msg.clone().into_data();
                 // println!("recp: {}, self: {}", recp.id, self.id.unwrap());
-                if recp.addr != self.addr {
+                if recp.id != self.id.unwrap() {
                     // println!("{}", recp.username);
                     // this is a peer functionality...
                     // if the client sent a string, other endpoints will NOT be happy.
@@ -103,7 +105,7 @@ impl GameSession {
                             } else if v[0] == START_LOBBY_EVENT && self.id.unwrap() == 0 {
                                 started = true;
                             } else if v[0] == DIED_OF_DEATH {
-                                println!("player {} died curr: {}", v[1], recp.id);
+                                // println!("DEATH!!! player {} died curr: {}", v[1], recp.id);
                                 if v[1] == recp.id {
                                     results.push(
                                         recp.sender.unbounded_send(Message::Binary(vec![DIED_OF_DEATH])).map(|_| recp)
@@ -130,7 +132,6 @@ impl GameSession {
                         Message::Ping(_) => results.push(Ok(recp)),
                         Message::Pong(_) => results.push(Ok(recp)),
                     }
-
                 } else if !v.is_empty() && v[0] == 7 {
                     started = true;
                     results.push(
@@ -148,6 +149,7 @@ impl GameSession {
             rooms.insert(self.room.clone(), server::Room {
                 seed: room.seed,
                 started,
+                nextid: room.nextid,
                 players: results.into_iter().filter_map(|i| i.ok()).collect()
             });
         }
@@ -182,22 +184,22 @@ impl GameSession {
         // tx = send, rx = receive
         let (tx, rx) = unbounded();
         let room_name = self.room.clone();
-        let room_lck = self.rooms.lock().await;
+        // let room_lck = self.rooms.lock().await;
 
-        let id: u8 = if room_lck.get(&room_name).is_some() {
-            room_lck.len() as u8
-        } else { 0 };
+        // let id: u8 = if room_lck.get(&room_name).is_some() {
+        //     room_lck.len() as u8
+        // } else { 0 };
 
-        drop(room_lck);
+        // drop(room_lck);
         
         // let mut plock = self.peer_map.lock().await;
-        let player = server::Player {
-            sender: tx.clone(),
-            username: self.username.clone(),
-            skin: self.skin,
-            addr: self.addr,
-            id
-        };
+        // let mut player = server::Player {
+        //     sender: tx.clone(),
+        //     username: self.username.clone(),
+        //     skin: self.skin,
+        //     addr: self.addr,
+        //     id
+        // };
         // plock.insert(self.addr, player.clone());
 
         // drop(plock);
@@ -208,22 +210,38 @@ impl GameSession {
             // if room already exists then we completely ignore the seed value
             println!("Just adding");
             // count starts from 0...
-            self.id = Some(room.players.len() as u8);
+            self.id = Some(room.nextid);
+            let player = server::Player {
+                sender: tx.clone(),
+                username: self.username.clone(),
+                skin: self.skin,
+                addr: self.addr,
+                id: room.nextid
+            };
+            room.nextid += 1;
             // send valid seed
             tx.unbounded_send(Message::Binary(vec![42, room.seed as u8])).unwrap();
-            room.players.push(player.clone());
+            room.players.push(player);
             room
         } else {
             // 69 means the client is the host and he is supposed to send in the cake coords
             println!("New");
             // 69 also means the player id is 0
             self.id = Some(0);
+            let player = server::Player {
+                sender: tx.clone(),
+                username: self.username.clone(),
+                skin: self.skin,
+                addr: self.addr,
+                id: 0
+            };
             // if this errors then the GameSession might as well close and not do anything
             tx.unbounded_send(Message::Binary(vec![69])).unwrap();
             rooms.entry(room_name).or_insert(server::Room {
                 started: false,
                 seed: self.seed,
-                players: vec![player.clone()]
+                nextid: 1,
+                players: vec![player]
             })
         };
 

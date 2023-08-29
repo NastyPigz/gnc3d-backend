@@ -57,6 +57,7 @@ pub type Tx = UnboundedSender<Message>;
 pub struct Room {
     pub seed: usize,
     pub started: bool,
+    pub nextid: u8,
     // more game settings
     pub players: Vec<Player>
 }
