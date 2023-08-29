@@ -110,6 +110,7 @@ impl GameSession {
                                     );
                                     continue;
                                 } else {
+                                    results.push(Ok(recp));
                                     continue;
                                 }
                             } else {
