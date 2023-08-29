@@ -103,6 +103,7 @@ impl GameSession {
                             } else if v[0] == START_LOBBY_EVENT && self.id.unwrap() == 0 {
                                 started = true;
                             } else if v[0] == DIED_OF_DEATH {
+                                println!("player {} died curr: {}", v[1], recp.id);
                                 if v[1] == recp.id {
                                     results.push(
                                         recp.sender.unbounded_send(Message::Binary(vec![DIED_OF_DEATH])).map(|_| recp)
