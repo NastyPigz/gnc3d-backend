@@ -1,7 +1,7 @@
 // u16 is used to distinguish txt and binary events
 pub const USER_DATA_EVENT: u8 = 0;
 // pub const USER_STATE_UPDATE: u8 = 1;
-// pub const DIED_OF_DEATH: u8 = 2;
+pub const DIED_OF_DEATH: u8 = 2;
 pub const CAKE_SPAWN_EVENT: u8 = 3;
 // pub const CAKE_COLLIDE_EVENT: u8 = 4;
 // pub const PLAYER_LEAVE_EVENT: u8 = 5;

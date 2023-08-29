@@ -7,16 +7,16 @@ use std::{
 use hyper::{
     server::conn::AddrStream,
     service::{make_service_fn, service_fn},
-    Server
+    Server,
 };
 
 use tokio::sync::Mutex;
 
+mod constants;
 mod server;
 mod session;
-mod constants;
 
-
+const IS_DEV: bool = option_env!("bals").is_some();
 
 #[tokio::main]
 async fn main() -> Result<(), hyper::Error> {
@@ -24,14 +24,22 @@ async fn main() -> Result<(), hyper::Error> {
     // let state = server::PeerMap::new(Mutex::new(HashMap::new()));
     let rooms = server::RoomMap::new(Mutex::new(HashMap::new()));
 
-    // let addr = "127.0.0.1:8080".to_string().parse().unwrap();
-    let addr = "0.0.0.0:443".to_string().parse().unwrap();
+    let addr = if IS_DEV {
+        "127.0.0.1:8080"
+    } else {
+        "0.0.0.0:443"
+    }
+    .to_string()
+    .parse()
+    .unwrap();
 
     let make_svc = make_service_fn(move |conn: &AddrStream| {
         let remote_addr = conn.remote_addr();
         // let state = state.clone();
         let rooms = rooms.clone();
-        let service = service_fn(move |req| server::handle_request(/* state.clone(), */ req, remote_addr, rooms.clone()));
+        let service = service_fn(move |req| {
+            server::handle_request(/* state.clone(), */ req, remote_addr, rooms.clone())
+        });
         async { Ok::<_, Infallible>(service) }
     });
 

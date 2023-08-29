@@ -16,7 +16,7 @@ use tokio_tungstenite::{
     WebSocketStream,
 };
 
-use crate::{server, constants::{USER_DATA_EVENT, CAKE_SPAWN_EVENT, START_LOBBY_EVENT, TXT_MESSAGE_CREATE, USER_NAME_EVENT}};
+use crate::{server, constants::{USER_DATA_EVENT, CAKE_SPAWN_EVENT, START_LOBBY_EVENT, TXT_MESSAGE_CREATE, USER_NAME_EVENT, DIED_OF_DEATH}};
 
 pub struct GameSession {
     // pub peer_map: server::PeerMap,
@@ -102,6 +102,16 @@ impl GameSession {
                                 }
                             } else if v[0] == START_LOBBY_EVENT && self.id.unwrap() == 0 {
                                 started = true;
+                            } else if v[0] == DIED_OF_DEATH {
+                                if v[1] == recp.id {
+                                    results.push(
+                                        recp.sender.unbounded_send(Message::Binary(vec![DIED_OF_DEATH])).map(|_| recp)
+                                            .map_err(|_| println!("Dropping session!"))
+                                    );
+                                    continue;
+                                } else {
+                                    continue;
+                                }
                             } else {
                                 v.insert(1, self.id.unwrap());
                             }
