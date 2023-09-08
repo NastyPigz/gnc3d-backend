@@ -16,7 +16,7 @@ use tokio_tungstenite::{
     WebSocketStream,
 };
 
-use crate::{server, constants::{USER_DATA_EVENT, CAKE_SPAWN_EVENT, START_LOBBY_EVENT, TXT_MESSAGE_CREATE, USER_NAME_EVENT, DIED_OF_DEATH}};
+use crate::{server, constants::{USER_DATA_EVENT, CAKE_SPAWN_EVENT, START_LOBBY_EVENT, TXT_MESSAGE_CREATE, USER_NAME_EVENT, DIED_OF_DEATH,BARRICADES_SPAWN_EVENT}};
 
 pub struct GameSession {
     // pub peer_map: server::PeerMap,
@@ -44,6 +44,7 @@ impl GameSession {
         if let Some(room) = rooms.remove(&self.room.clone()) {
             let mut started = room.started;
             let mut results = Vec::new();
+            let mut barricade_counter: f32 = room.barricade_counter;
             // println!("Room has players {}", room.players.len());
             // println!("Starting loop, length: {}", room.players.len());
             for recp in room.players {
@@ -88,11 +89,22 @@ impl GameSession {
                                 v.insert(5, bytes[1]);
                                 v.insert(6, bytes[2]);
                                 v.insert(7, bytes[3]);
+                                let event_name = f32::from_le_bytes([v[0],v[1],v[2],v[3]]) as u8;
+                                println!("eventtNAMe => {} ",event_name );
+                                if event_name == BARRICADES_SPAWN_EVENT{
+                                    barricade_counter+=1.0;
+                                    print!("barricade_counter => {}\n", barricade_counter);
+                                    let barricade_counter_bytes = barricade_counter.to_le_bytes();
+                                    v.insert(4, barricade_counter_bytes[0]);
+                                    v.insert(5, barricade_counter_bytes[1]);
+                                    v.insert(6, barricade_counter_bytes[2]);
+                                    v.insert(7, barricade_counter_bytes[3]);
+                                } 
                             } else if v.len() == 4*10 {
                                 let user_id = f32::from_le_bytes([v[4], v[5], v[6], v[7]]) as u8;
                                 if recp.id == user_id {
                                     let mut new_v: Vec<u8> = Vec::new();
-                                    new_v.extend_from_slice(&(CAKE_SPAWN_EVENT as f32).to_le_bytes());
+                                                                        new_v.extend_from_slice(&(CAKE_SPAWN_EVENT as f32).to_le_bytes());
                                     new_v.extend_from_slice(&(self.id.unwrap() as f32).to_le_bytes());
                                     // from 9th and beyond are cake data
                                     new_v.extend_from_slice(&v[8..]);
@@ -150,7 +162,8 @@ impl GameSession {
                 seed: room.seed,
                 started,
                 nextid: room.nextid,
-                players: results.into_iter().filter_map(|i| i.ok()).collect()
+                players: results.into_iter().filter_map(|i| i.ok()).collect(),
+                barricade_counter:barricade_counter
             });
         }
 
@@ -219,6 +232,7 @@ impl GameSession {
                 id: room.nextid
             };
             room.nextid += 1;
+            // room.ba
             // send valid seed
             tx.unbounded_send(Message::Binary(vec![42, room.seed as u8])).unwrap();
             room.players.push(player);
@@ -241,7 +255,8 @@ impl GameSession {
                 started: false,
                 seed: self.seed,
                 nextid: 1,
-                players: vec![player]
+                players: vec![player],
+                barricade_counter:0.0
             })
         };
 

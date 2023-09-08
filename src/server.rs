@@ -59,7 +59,8 @@ pub struct Room {
     pub started: bool,
     pub nextid: u8,
     // more game settings
-    pub players: Vec<Player>
+    pub players: Vec<Player>,
+    pub barricade_counter:f32
 }
 pub type RoomMap = Arc<Mutex<HashMap<String, Room>>>;
 
