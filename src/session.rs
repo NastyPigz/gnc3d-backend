@@ -179,7 +179,7 @@ impl GameSession {
                                     .map(|_| recp)
                                     .map_err(|_| println!("Dropping session!")),
                             );
-                        } else if v.len() == 4 * 2 && v[0] == BARRICADE_GONE_EVENT {
+                        } else if v.len() == 4 * 2 && f32::from_le_bytes([v[0], v[1], v[2], v[3]]) as u8 == BARRICADE_GONE_EVENT {
                             v.splice(4..4, (self.id.unwrap() as f32).to_le_bytes());
                             results.push(
                                 recp.sender
