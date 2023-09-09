@@ -111,7 +111,7 @@ impl GameSession {
                                 // this shit too so long to debug, JS ws uses little endian
                                 let event_id = f32::from_le_bytes([v[0], v[1], v[2], v[3]]) as u8;
                                 if event_id == BARRICADE_SPAWN_EVENT {
-                                    println!("barricade_counter => {}\n", barricade_counter);
+                                    println!("barricade_counter non-recp => {}\n", barricade_counter);
                                     v.splice(4..4, barricade_counter.to_le_bytes());
                                     v.splice(4..4, (self.id.unwrap() as f32).to_le_bytes());
                                     barricade_counter += 1.0;
@@ -163,9 +163,9 @@ impl GameSession {
                                     .map(|_| recp)
                                     .map_err(|_| println!("Dropping session!")),
                             );
-                        } else if v.len() == 4 * 7 && v[0] == BARRICADE_SPAWN_EVENT {
+                        } else if v.len() == 4 * 7 && f32::from_le_bytes([v[0], v[1], v[2], v[3]]) as u8 == BARRICADE_SPAWN_EVENT {
                             // send barricade stuff to the current user too
-                            println!("barricade_counter => {}\n", barricade_counter);
+                            println!("barricade_counter recp => {}\n", barricade_counter);
                             v.splice(4..4, barricade_counter.to_le_bytes());
                             v.splice(4..4, (self.id.unwrap() as f32).to_le_bytes());
                             barricade_counter += 1.0;
