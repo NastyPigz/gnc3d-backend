@@ -12,7 +12,7 @@ use tokio_tungstenite::{
 
 use crate::{
     constants::{
-        BARRICADES_SPAWN_EVENT, CAKE_SPAWN_EVENT, DIED_OF_DEATH, START_LOBBY_EVENT,
+        BARRICADE_SPAWN_EVENT, BARRICADE_GONE_EVENT, CAKE_SPAWN_EVENT, DIED_OF_DEATH, START_LOBBY_EVENT,
         TXT_MESSAGE_CREATE, USER_DATA_EVENT, USER_NAME_EVENT,
     },
     server,
@@ -37,28 +37,17 @@ impl GameSession {
     async fn recv(&self, msg: Message) -> Result<(), Error> {
         // let peers = self.peer_map.lock().await;
         // println!("Receiving");
-        let mut rooms = self.rooms.lock().await;
+        // let mut rooms = self.rooms.lock().await;
         // println!("Ok(rooms)");
         // println!("{:?}", msg);
 
-        if let Some(room) = rooms.remove(&self.room.clone()) {
-            let mut started = room.started;
-            let mut results = Vec::new();
-            let mut barricade_counter = room.barricade_counter;
-            // println!("Room has players {}", room.players.len());
-            // println!("Starting loop, length: {}", room.players.len());
-            for recp in room.players {
-                // println!("{:?}", recp);
-                let mut v = msg.clone().into_data();
-                // println!("recp: {}, self: {}", recp.id, self.id.unwrap());
-                if recp.id != self.id.unwrap() {
-                    // println!("{}", recp.username);
-                    // this is a peer functionality...
-                    // if the client sent a string, other endpoints will NOT be happy.
-                    match msg {
-                        // we have to do results.push(Ok(recp)) or else it will lead to undefined behaviour
-                        // maybe we can utilize Message::Text
-                        Message::Text(_) => {
+        match msg {
+            Message::Text(_) => {
+                let mut rooms = self.rooms.lock().await;
+                if let Some(room) = rooms.remove(&self.room.clone()) {
+                    let mut results = Vec::new();
+                    for recp in room.players {
+                        if recp.id != self.id.unwrap() {
                             // hopefully nobody is trolling me and this panics
                             let mut txt = msg.clone().into_text().unwrap();
                             // text standard format:
@@ -78,8 +67,36 @@ impl GameSession {
                                 results.push(Ok(recp));
                             }
                         }
-                        Message::Binary(_) => {
-                            // because matching msg.clone() probably takes more time
+                    }
+                    // no need to do stuff like sending close events, the "disconnect" f'n would've been called already
+                    // if they actually disconnected
+                    rooms.insert(
+                        self.room.clone(),
+                        server::Room {
+                            seed: room.seed,
+                            started: room.started,
+                            nextid: room.nextid,
+                            players: results.into_iter().filter_map(|i| i.ok()).collect(),
+                            barricade_counter: room.barricade_counter,
+                        },
+                    );
+                }
+            }
+            Message::Binary(_) => {
+                let mut rooms = self.rooms.lock().await;
+                if let Some(room) = rooms.remove(&self.room.clone()) {
+                    let mut started = room.started;
+                    let mut results = Vec::new();
+                    let mut barricade_counter = room.barricade_counter;
+                    // println!("Room has players {}", room.players.len());
+                    // println!("Starting loop, length: {}", room.players.len());
+                    
+                    for recp in room.players {
+                        let mut v = msg.clone().into_data();
+                        if recp.id != self.id.unwrap() {
+                            // println!("{}", recp.username);
+                            // this is a peer functionality...
+                            // if the client sent a string, other endpoints will NOT be happy.
                             if v.is_empty() {
                                 // this shouldn't happen but it will crazily error if it is the case
                                 // we are gonna assume this guy is disconnected and deleting him from players list
@@ -87,20 +104,16 @@ impl GameSession {
                             }
                             if v.len() == 4 * 11 // state update
                                 || v.len() == 4 * 9 // cake spawn +1 cake type
-                                || v.len() == 4 * 2 // cake gone or cake collide
-                                || v.len() == 4 * 8 // cake final
-                                || v.len() == 4 * 7 // barricades
+                                || v.len() == 4 * 2 // cake gone / cake collide / barricade gone
+                                || v.len() == 4 * 8 // cake final / barricade final
+                                || v.len() == 4 * 7 // barricade spawn
                             {
                                 // this shit too so long to debug, JS ws uses little endian
                                 let event_id = f32::from_le_bytes([v[0], v[1], v[2], v[3]]) as u8;
-                                if event_id == BARRICADES_SPAWN_EVENT {
+                                if event_id == BARRICADE_SPAWN_EVENT {
                                     println!("barricade_counter => {}\n", barricade_counter);
                                     v.splice(4..4, barricade_counter.to_le_bytes());
                                     v.splice(4..4, (self.id.unwrap() as f32).to_le_bytes());
-                                    // v.insert(4, barricade_counter_bytes[0]);
-                                    // v.insert(5, barricade_counter_bytes[1]);
-                                    // v.insert(6, barricade_counter_bytes[2]);
-                                    // v.insert(7, barricade_counter_bytes[3]);
                                     barricade_counter += 1.0;
                                 } else {
                                     v.splice(4..4, (self.id.unwrap() as f32).to_le_bytes());
@@ -144,49 +157,63 @@ impl GameSession {
                             } else {
                                 v.insert(1, self.id.unwrap());
                             }
-                            // results.push(recp.sender.unbounded_send(Message::Binary(v)));
-                            // let res = session.session.text(serde_json::to_string(&msg).unwrap()).await;
                             results.push(
                                 recp.sender
                                     .unbounded_send(Message::Binary(v))
                                     .map(|_| recp)
                                     .map_err(|_| println!("Dropping session!")),
                             );
+                        } else if v.len() == 4 * 7 && v[0] == BARRICADE_SPAWN_EVENT {
+                            // send barricade stuff to the current user too
+                            println!("barricade_counter => {}\n", barricade_counter);
+                            v.splice(4..4, barricade_counter.to_le_bytes());
+                            v.splice(4..4, (self.id.unwrap() as f32).to_le_bytes());
+                            barricade_counter += 1.0;
+                            results.push(
+                                recp.sender
+                                    .unbounded_send(Message::Binary(v))
+                                    .map(|_| recp)
+                                    .map_err(|_| println!("Dropping session!")),
+                            );
+                        } else if v.len() == 4 * 2 && v[0] == BARRICADE_GONE_EVENT {
+                            v.splice(4..4, (self.id.unwrap() as f32).to_le_bytes());
+                            results.push(
+                                recp.sender
+                                    .unbounded_send(Message::Binary(v))
+                                    .map(|_| recp)
+                                    .map_err(|_| println!("Dropping session!")),
+                            );
+                        } else if !v.is_empty() && v[0] == START_LOBBY_EVENT && self.id.unwrap() == 0 {
+                            started = true;
+                            results.push(
+                                recp.sender
+                                    .unbounded_send(msg.clone())
+                                    .map(|_| recp)
+                                    .map_err(|_| println!("Dropping session!")),
+                            );
+                        } else {
+                            results.push(Ok(recp));
                         }
-                        Message::Close(_) => results.push(Ok(recp)), /* disconnect function should handle this? */
-                        Message::Frame(_) => results.push(Ok(recp)),
-                        // the connection still works without ping and pong so we are gonna save some bytes here
-                        Message::Ping(_) => results.push(Ok(recp)),
-                        Message::Pong(_) => results.push(Ok(recp)),
                     }
-                } else if v.len() == 4 * 7 {
-                    
-                } else if !v.is_empty() && v[0] == START_LOBBY_EVENT && self.id.unwrap() == 0 {
-                    started = true;
-                    results.push(
-                        recp.sender
-                            .unbounded_send(msg.clone())
-                            .map(|_| recp)
-                            .map_err(|_| println!("Dropping session!")),
+                    // no need to do stuff like sending close events, the "disconnect" f'n would've been called already
+                    // if they actually disconnected
+                    rooms.insert(
+                        self.room.clone(),
+                        server::Room {
+                            seed: room.seed,
+                            started,
+                            nextid: room.nextid,
+                            players: results.into_iter().filter_map(|i| i.ok()).collect(),
+                            barricade_counter,
+                        },
                     );
-                } else {
-                    results.push(Ok(recp));
                 }
             }
-            // no need to do stuff like sending close events, the "disconnect" f'n would've been called already
-            // if they actually disconnected
-            // println!("Insertion failed here");
-            // println!("Hmm, {:?}", results);
-            rooms.insert(
-                self.room.clone(),
-                server::Room {
-                    seed: room.seed,
-                    started,
-                    nextid: room.nextid,
-                    players: results.into_iter().filter_map(|i| i.ok()).collect(),
-                    barricade_counter,
-                },
-            );
+            Message::Close(_) => (), /* disconnect function should handle this? */
+            Message::Frame(_) => (),
+            // the connection still works without ping and pong so we are gonna save some bytes here
+            Message::Ping(_) => (),
+            Message::Pong(_) => (),
         }
 
         // let broadcast_recipients = rooms.entry(self.room.clone()).or_insert(server::Room {

@@ -9,7 +9,11 @@ pub const CAKE_SPAWN_EVENT: u8 = 3;
 pub const START_LOBBY_EVENT: u8 = 7;
 pub const TXT_MESSAGE_CREATE: u16 = 8;
 pub const USER_NAME_EVENT: u16 = 9;
-pub const BARRICADES_SPAWN_EVENT: u8 = 12;
+// pub const CAKE_FINAL_EVENT: u8 = 10;
+// pub const CAKE_GONE_EVENT: u8 = 11;
+pub const BARRICADE_SPAWN_EVENT: u8 = 12;
+// pub const BARRICADE_FINAL_EVENT: u8 = 13;
+pub const BARRICADE_GONE_EVENT: u8 = 14;
 
 // pub const GERMINATION_EVENT: u8 = 42;
 // pub const IS_HOST_EVENT: u8 = 69;
