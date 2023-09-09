@@ -13,7 +13,7 @@ use tokio_tungstenite::{
 use crate::{
     constants::{
         BARRICADE_SPAWN_EVENT, BARRICADE_GONE_EVENT, CAKE_SPAWN_EVENT, DIED_OF_DEATH, START_LOBBY_EVENT,
-        TXT_MESSAGE_CREATE, USER_DATA_EVENT, USER_NAME_EVENT,
+        TXT_MESSAGE_CREATE, USER_DATA_EVENT, USER_NAME_EVENT, GERMINATION_EVENT, IS_HOST_EVENT
     },
     server,
 };
@@ -287,8 +287,10 @@ impl GameSession {
             room.nextid += 1;
             // room.ba
             // send valid seed
-            tx.unbounded_send(Message::Binary(vec![42, room.seed as u8]))
+            tx.unbounded_send(Message::Binary(vec![GERMINATION_EVENT, room.seed as u8]))
                 .unwrap();
+            // send user id
+            tx.unbounded_send(Message::Binary(vec![IS_HOST_EVENT, player.id])).unwrap();
             room.players.push(player);
             room
         } else {
@@ -304,7 +306,7 @@ impl GameSession {
                 id: 0,
             };
             // if this errors then the GameSession might as well close and not do anything
-            tx.unbounded_send(Message::Binary(vec![69])).unwrap();
+            tx.unbounded_send(Message::Binary(vec![IS_HOST_EVENT, 0])).unwrap();
             rooms.entry(room_name).or_insert(server::Room {
                 started: false,
                 seed: self.seed,

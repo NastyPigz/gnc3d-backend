@@ -15,5 +15,5 @@ pub const BARRICADE_SPAWN_EVENT: u8 = 12;
 // pub const BARRICADE_FINAL_EVENT: u8 = 13;
 pub const BARRICADE_GONE_EVENT: u8 = 14;
 
-// pub const GERMINATION_EVENT: u8 = 42;
-// pub const IS_HOST_EVENT: u8 = 69;
+pub const GERMINATION_EVENT: u8 = 42;
+pub const IS_HOST_EVENT: u8 = 69;
