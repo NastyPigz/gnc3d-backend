@@ -25,13 +25,16 @@ async fn main() -> Result<(), hyper::Error> {
     let rooms = server::RoomMap::new(Mutex::new(HashMap::new()));
 
     let addr = if IS_DEV {
-        "127.0.0.1:8080"
+        // "127.0.0.1:8080"
+        "0.0.0.0:8080"
     } else {
         "0.0.0.0:443"
     }
     .to_string()
     .parse()
     .unwrap();
+
+    println!("{}", addr);
 
     let make_svc = make_service_fn(move |conn: &AddrStream| {
         let remote_addr = conn.remote_addr();

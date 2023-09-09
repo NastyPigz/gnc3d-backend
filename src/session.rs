@@ -1,22 +1,22 @@
-use std::{
-    // env,
-    net::SocketAddr
-};
+use std::net::SocketAddr;
 
 use hyper::upgrade::Upgraded;
 
 use futures_channel::mpsc::unbounded;
-use futures_util::{future, pin_mut, TryStreamExt, StreamExt};
+use futures_util::{future, pin_mut, StreamExt, TryStreamExt};
 
 use tokio_tungstenite::{
-    tungstenite::{
-        Error,
-        protocol::Message
-    },
+    tungstenite::{protocol::Message, Error},
     WebSocketStream,
 };
 
-use crate::{server, constants::{USER_DATA_EVENT, CAKE_SPAWN_EVENT, START_LOBBY_EVENT, TXT_MESSAGE_CREATE, USER_NAME_EVENT, DIED_OF_DEATH,BARRICADES_SPAWN_EVENT}};
+use crate::{
+    constants::{
+        BARRICADES_SPAWN_EVENT, CAKE_SPAWN_EVENT, DIED_OF_DEATH, START_LOBBY_EVENT,
+        TXT_MESSAGE_CREATE, USER_DATA_EVENT, USER_NAME_EVENT,
+    },
+    server,
+};
 
 pub struct GameSession {
     // pub peer_map: server::PeerMap,
@@ -26,7 +26,7 @@ pub struct GameSession {
     pub skin: u8,
     pub seed: usize,
     pub room: String,
-    pub id: Option<u8>
+    pub id: Option<u8>,
 }
 
 // modern problems require modern solutions
@@ -44,7 +44,7 @@ impl GameSession {
         if let Some(room) = rooms.remove(&self.room.clone()) {
             let mut started = room.started;
             let mut results = Vec::new();
-            let mut barricade_counter: f32 = room.barricade_counter;
+            let mut barricade_counter = room.barricade_counter;
             // println!("Room has players {}", room.players.len());
             // println!("Starting loop, length: {}", room.players.len());
             for recp in room.players {
@@ -64,17 +64,20 @@ impl GameSession {
                             // text standard format:
                             // event_code + message
                             // note that both are std::option::Option
-                            if txt.chars().next() == char::from_digit(TXT_MESSAGE_CREATE.into(), 10) {
+                            if txt.chars().next() == char::from_digit(TXT_MESSAGE_CREATE.into(), 10)
+                            {
                                 // WHO NEEDS JSON WHEN YOU HAVE COMMAS?!?!
                                 txt.insert_str(1, &format!(",{},", self.id.unwrap()));
                                 results.push(
-                                    recp.sender.unbounded_send(Message::Text(txt)).map(|_| recp)
+                                    recp.sender
+                                        .unbounded_send(Message::Text(txt))
+                                        .map(|_| recp)
                                         .map_err(|_| println!("Dropping session!")),
                                 );
                             } else {
                                 results.push(Ok(recp));
                             }
-                        },
+                        }
                         Message::Binary(_) => {
                             // because matching msg.clone() probably takes more time
                             if v.is_empty() {
@@ -82,34 +85,42 @@ impl GameSession {
                                 // we are gonna assume this guy is disconnected and deleting him from players list
                                 continue;
                             }
-                            if v.len() == 4*11 || v.len() == 4*9 || v.len() == 4*2 || v.len() == 4*8 {
+                            if v.len() == 4 * 11 // state update
+                                || v.len() == 4 * 9 // cake spawn +1 cake type
+                                || v.len() == 4 * 2 // cake gone or cake collide
+                                || v.len() == 4 * 8 // cake final
+                                || v.len() == 4 * 7 // barricades
+                            {
                                 // this shit too so long to debug, JS ws uses little endian
-                                let bytes = (self.id.unwrap() as f32).to_le_bytes();
-                                v.insert(4, bytes[0]);
-                                v.insert(5, bytes[1]);
-                                v.insert(6, bytes[2]);
-                                v.insert(7, bytes[3]);
-                                let event_name = f32::from_le_bytes([v[0],v[1],v[2],v[3]]) as u8;
-                                println!("eventtNAMe => {} ",event_name );
-                                if event_name == BARRICADES_SPAWN_EVENT{
-                                    barricade_counter+=1.0;
-                                    print!("barricade_counter => {}\n", barricade_counter);
-                                    let barricade_counter_bytes = barricade_counter.to_le_bytes();
-                                    v.insert(4, barricade_counter_bytes[0]);
-                                    v.insert(5, barricade_counter_bytes[1]);
-                                    v.insert(6, barricade_counter_bytes[2]);
-                                    v.insert(7, barricade_counter_bytes[3]);
-                                } 
-                            } else if v.len() == 4*10 {
+                                let event_id = f32::from_le_bytes([v[0], v[1], v[2], v[3]]) as u8;
+                                if event_id == BARRICADES_SPAWN_EVENT {
+                                    println!("barricade_counter => {}\n", barricade_counter);
+                                    v.splice(4..4, barricade_counter.to_le_bytes());
+                                    v.splice(4..4, (self.id.unwrap() as f32).to_le_bytes());
+                                    // v.insert(4, barricade_counter_bytes[0]);
+                                    // v.insert(5, barricade_counter_bytes[1]);
+                                    // v.insert(6, barricade_counter_bytes[2]);
+                                    // v.insert(7, barricade_counter_bytes[3]);
+                                    barricade_counter += 1.0;
+                                } else {
+                                    v.splice(4..4, (self.id.unwrap() as f32).to_le_bytes());
+                                }
+                            } else if v.len() == 4 * 10 {
                                 let user_id = f32::from_le_bytes([v[4], v[5], v[6], v[7]]) as u8;
                                 if recp.id == user_id {
                                     let mut new_v: Vec<u8> = Vec::new();
-                                                                        new_v.extend_from_slice(&(CAKE_SPAWN_EVENT as f32).to_le_bytes());
-                                    new_v.extend_from_slice(&(self.id.unwrap() as f32).to_le_bytes());
+                                    new_v.extend_from_slice(
+                                        &(CAKE_SPAWN_EVENT as f32).to_le_bytes(),
+                                    );
+                                    new_v.extend_from_slice(
+                                        &(self.id.unwrap() as f32).to_le_bytes(),
+                                    );
                                     // from 9th and beyond are cake data
                                     new_v.extend_from_slice(&v[8..]);
                                     results.push(
-                                        recp.sender.unbounded_send(Message::Binary(new_v)).map(|_| recp)
+                                        recp.sender
+                                            .unbounded_send(Message::Binary(new_v))
+                                            .map(|_| recp)
                                             .map_err(|_| println!("Dropping session!")),
                                     );
                                     continue;
@@ -120,8 +131,10 @@ impl GameSession {
                                 // println!("DEATH!!! player {} died curr: {}", v[1], recp.id);
                                 if v[1] == recp.id {
                                     results.push(
-                                        recp.sender.unbounded_send(Message::Binary(vec![DIED_OF_DEATH])).map(|_| recp)
-                                            .map_err(|_| println!("Dropping session!"))
+                                        recp.sender
+                                            .unbounded_send(Message::Binary(vec![DIED_OF_DEATH]))
+                                            .map(|_| recp)
+                                            .map_err(|_| println!("Dropping session!")),
                                     );
                                     continue;
                                 } else {
@@ -134,20 +147,26 @@ impl GameSession {
                             // results.push(recp.sender.unbounded_send(Message::Binary(v)));
                             // let res = session.session.text(serde_json::to_string(&msg).unwrap()).await;
                             results.push(
-                                recp.sender.unbounded_send(Message::Binary(v)).map(|_| recp)
+                                recp.sender
+                                    .unbounded_send(Message::Binary(v))
+                                    .map(|_| recp)
                                     .map_err(|_| println!("Dropping session!")),
                             );
-                        },
+                        }
                         Message::Close(_) => results.push(Ok(recp)), /* disconnect function should handle this? */
                         Message::Frame(_) => results.push(Ok(recp)),
                         // the connection still works without ping and pong so we are gonna save some bytes here
                         Message::Ping(_) => results.push(Ok(recp)),
                         Message::Pong(_) => results.push(Ok(recp)),
                     }
-                } else if !v.is_empty() && v[0] == 7 {
+                } else if v.len() == 4 * 7 {
+                    
+                } else if !v.is_empty() && v[0] == START_LOBBY_EVENT && self.id.unwrap() == 0 {
                     started = true;
                     results.push(
-                        recp.sender.unbounded_send(msg.clone()).map(|_| recp)
+                        recp.sender
+                            .unbounded_send(msg.clone())
+                            .map(|_| recp)
                             .map_err(|_| println!("Dropping session!")),
                     );
                 } else {
@@ -158,13 +177,16 @@ impl GameSession {
             // if they actually disconnected
             // println!("Insertion failed here");
             // println!("Hmm, {:?}", results);
-            rooms.insert(self.room.clone(), server::Room {
-                seed: room.seed,
-                started,
-                nextid: room.nextid,
-                players: results.into_iter().filter_map(|i| i.ok()).collect(),
-                barricade_counter:barricade_counter
-            });
+            rooms.insert(
+                self.room.clone(),
+                server::Room {
+                    seed: room.seed,
+                    started,
+                    nextid: room.nextid,
+                    players: results.into_iter().filter_map(|i| i.ok()).collect(),
+                    barricade_counter,
+                },
+            );
         }
 
         // let broadcast_recipients = rooms.entry(self.room.clone()).or_insert(server::Room {
@@ -185,7 +207,7 @@ impl GameSession {
         //         results.push(recp.sender.unbounded_send(Message::Binary(v)));
         //     }
         // }
-        
+
         Ok(())
     }
 
@@ -204,7 +226,7 @@ impl GameSession {
         // } else { 0 };
 
         // drop(room_lck);
-        
+
         // let mut plock = self.peer_map.lock().await;
         // let mut player = server::Player {
         //     sender: tx.clone(),
@@ -229,12 +251,13 @@ impl GameSession {
                 username: self.username.clone(),
                 skin: self.skin,
                 addr: self.addr,
-                id: room.nextid
+                id: room.nextid,
             };
             room.nextid += 1;
             // room.ba
             // send valid seed
-            tx.unbounded_send(Message::Binary(vec![42, room.seed as u8])).unwrap();
+            tx.unbounded_send(Message::Binary(vec![42, room.seed as u8]))
+                .unwrap();
             room.players.push(player);
             room
         } else {
@@ -247,7 +270,7 @@ impl GameSession {
                 username: self.username.clone(),
                 skin: self.skin,
                 addr: self.addr,
-                id: 0
+                id: 0,
             };
             // if this errors then the GameSession might as well close and not do anything
             tx.unbounded_send(Message::Binary(vec![69])).unwrap();
@@ -256,7 +279,7 @@ impl GameSession {
                 seed: self.seed,
                 nextid: 1,
                 players: vec![player],
-                barricade_counter:0.0
+                barricade_counter: 0.0,
             })
         };
 
@@ -266,7 +289,7 @@ impl GameSession {
         //     .or_insert_with(Vec::new);
 
         // entry.push(player);
-        
+
         // from this point on self.id is definitely Some(u8)
 
         // sending username is no longer a uint8
@@ -279,16 +302,34 @@ impl GameSession {
                 continue;
             }
             // v2.extend_from_slice(recp.username.as_bytes());
-            recp.sender.unbounded_send(Message::Binary(vec![USER_DATA_EVENT, self.id.unwrap(), self.skin])).unwrap();
-            recp.sender.unbounded_send(Message::Text(USER_NAME_EVENT.to_string() + "," + &self.id.unwrap().to_string() + "," + &self.username)).unwrap();
+            recp.sender
+                .unbounded_send(Message::Binary(vec![
+                    USER_DATA_EVENT,
+                    self.id.unwrap(),
+                    self.skin,
+                ]))
+                .unwrap();
+            recp.sender
+                .unbounded_send(Message::Text(
+                    USER_NAME_EVENT.to_string()
+                        + ","
+                        + &self.id.unwrap().to_string()
+                        + ","
+                        + &self.username,
+                ))
+                .unwrap();
             // send each user OUR username
             // results.push(
             //     recp.sender.unbounded_send(Message::Binary(v.clone())).map(|_| recp)
             //         .map_err(|_| println!("Dropping session")),
             // );
             // send client each user's id, sex, then username
-            tx.unbounded_send(Message::Binary(vec![USER_DATA_EVENT, recp.id, recp.skin])).unwrap();
-            tx.unbounded_send(Message::Text(USER_NAME_EVENT.to_string() + "," + &recp.id.to_string() + "," + &recp.username)).unwrap();
+            tx.unbounded_send(Message::Binary(vec![USER_DATA_EVENT, recp.id, recp.skin]))
+                .unwrap();
+            tx.unbounded_send(Message::Text(
+                USER_NAME_EVENT.to_string() + "," + &recp.id.to_string() + "," + &recp.username,
+            ))
+            .unwrap();
         }
         // entry.players = results.into_iter().filter_map(|i| i.ok()).collect();
         // entry.players.push(player);
@@ -301,12 +342,12 @@ impl GameSession {
         //     // send client each user's username
         //     tx.unbounded_send(Message::Binary(v2)).unwrap();
         // }
-    
+
         // drop(plock);
         drop(rooms);
-    
+
         let (outgoing, incoming) = ws_stream.split();
-    
+
         // let broadcast_incoming = incoming.try_for_each(|msg| {
         //     let pmap = self.peer_map.clone();
         //     async move {
@@ -314,24 +355,24 @@ impl GameSession {
         //         println!("Received a message from {}", self.addr);
         //         // current sends to every peer
         //         let peers = pmap.lock().await;
-    
+
         //         // We want to broadcast the message to everyone except ourselves.
         //         let broadcast_recipients =
         //             peers.iter().filter(|(peer_addr, _)| peer_addr != &&self.addr).map(|(_, player)| player);
-    
+
         //         for recp in broadcast_recipients {
         //             recp.sender.unbounded_send(msg.clone()).unwrap();
         //         }
-    
+
         //         Ok(())
         //         // future::ok(())
         //     }
         // });
 
         let broadcast_incoming = incoming.try_for_each(|msg| self.recv(msg));
-    
+
         let receive_from_others = rx.map(Ok).forward(outgoing);
-    
+
         pin_mut!(broadcast_incoming, receive_from_others);
         future::select(broadcast_incoming, receive_from_others).await;
         self.disonnect().await;
@@ -351,11 +392,11 @@ impl GameSession {
                     // dont give a shit whether or not they are still connected, close if they are here
                     // no longer using .unwrap_unchecked()
                     // unsafe {
-                        p.sender.unbounded_send(Message::Close(None)).unwrap();
+                    p.sender.unbounded_send(Message::Close(None)).unwrap();
                     // }
                 }
             }
-            return
+            return;
         }
 
         // this SHOULD NOT fail
@@ -371,7 +412,9 @@ impl GameSession {
                     // println!("Sending close message to {}", p.id);
                     // no longer using .unwrap_unchecked()
                     // unsafe {
-                        p.sender.unbounded_send(Message::Binary(vec![5, self.id.unwrap()])).unwrap();
+                    p.sender
+                        .unbounded_send(Message::Binary(vec![5, self.id.unwrap()]))
+                        .unwrap();
                     // }
                     true
                 } else {

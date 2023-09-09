@@ -1,9 +1,10 @@
 use std::{
+    borrow::Cow,
     collections::HashMap,
     convert::Infallible,
     // env,
     net::SocketAddr,
-    sync::Arc, borrow::Cow
+    sync::Arc,
 };
 
 use hyper::{
@@ -19,20 +20,20 @@ use futures_channel::mpsc::UnboundedSender;
 use tokio_tungstenite::{
     tungstenite::{
         handshake::derive_accept_key,
-        protocol::{Message, Role, CloseFrame, frame::coding::CloseCode},
+        protocol::{frame::coding::CloseCode, CloseFrame, Message, Role},
     },
     WebSocketStream,
 };
 
-use sysinfo::{System, SystemExt, ProcessExt};
+use sysinfo::{ProcessExt, System, SystemExt};
 
+use crate::session;
 use tokio::sync::Mutex;
 use url::Url;
-use crate::session;
 
 // SERVERSIDE cake validation
 // the room HOST will spawn the cakes and send the positions over.
-// the room 
+// the room
 
 #[derive(Clone, Debug)]
 pub struct Player {
@@ -42,7 +43,7 @@ pub struct Player {
     // 0 is male, 1 is female, 2 is Jamal
     pub skin: u8,
     // hard limit max room size 255, fps will probably crash before this is hit
-    pub id: u8
+    pub id: u8,
 }
 
 pub type Tx = UnboundedSender<Message>;
@@ -60,16 +61,15 @@ pub struct Room {
     pub nextid: u8,
     // more game settings
     pub players: Vec<Player>,
-    pub barricade_counter:f32
+    pub barricade_counter: f32,
 }
 pub type RoomMap = Arc<Mutex<HashMap<String, Room>>>;
-
 
 pub async fn handle_request(
     // peer_map: PeerMap,
     mut req: Request<Body>,
     addr: SocketAddr,
-    rooms: RoomMap
+    rooms: RoomMap,
 ) -> Result<Response<Body>, Infallible> {
     // health check stuff
     if req.uri() == "/healthz" {
@@ -84,7 +84,10 @@ pub async fn handle_request(
             let cpu_usage = process.cpu_usage();
             let disk_usage = process.disk_usage();
 
-            println!("Memory usage: {} KB | CPU usage: {}% | DISK usage: {}/{}", memory, cpu_usage, disk_usage.written_bytes, disk_usage.total_written_bytes);
+            println!(
+                "Memory usage: {} KB | CPU usage: {}% | DISK usage: {}/{}",
+                memory, cpu_usage, disk_usage.written_bytes, disk_usage.total_written_bytes
+            );
         }
 
         // println!("=> disks:");
@@ -130,23 +133,29 @@ pub async fn handle_request(
             .and_then(|h| h.to_str().ok())
             .map(|h| h.eq_ignore_ascii_case("websocket"))
             .unwrap_or(false)
-        || !headers.get(SEC_WEBSOCKET_VERSION).map(|h| h == "13").unwrap_or(false)
+        || !headers
+            .get(SEC_WEBSOCKET_VERSION)
+            .map(|h| h == "13")
+            .unwrap_or(false)
         || key.is_none()
-        // || req.uri() != "/socket"
+    // || req.uri() != "/socket"
     /* \end{condition} */
     {
-        return Ok(Response::new(Body::from("Yur version or browser is outdated innit bruv")));
+        return Ok(Response::new(Body::from(
+            "Yur version or browser is outdated innit bruv (If you are pinging this website, it means the multiplayer engine is running!",
+        )));
     }
     // println!("{:?}", req.uri());
     // println!("{:?}", req.uri().query());
     // Dumbass lib, have to concat smh. I cannot get full url otherwise
-    println!("{:?}", ("https://example.org".to_string() + &req.uri().to_string()));
+    println!(
+        "{:?}",
+        ("https://example.org".to_string() + &req.uri().to_string())
+    );
     let queries = Url::parse(&("https://example.org".to_string() + &req.uri().to_string()))
         .expect("Failed to parse URI")
         .query_pairs()
-        .map(|(k, v)| {
-            (k.into(), v.into_owned())
-        })
+        .map(|(k, v)| (k.into(), v.into_owned()))
         // .filter_map(|(k, v)| {
         //     let name = k.into_owned();
         //     if name == "username" {
@@ -175,11 +184,15 @@ pub async fn handle_request(
                 tokio::task::spawn(async move {
                     match hyper::upgrade::on(&mut req).await {
                         Ok(upgraded) => {
-                            let mut ws = WebSocketStream::from_raw_socket(upgraded, Role::Server, None).await;
+                            let mut ws =
+                                WebSocketStream::from_raw_socket(upgraded, Role::Server, None)
+                                    .await;
                             ws.close(Some(CloseFrame {
                                 code: CloseCode::from(4001),
-                                reason: Cow::Owned("Room already started innit bruv".to_string())
-                            })).await.unwrap();
+                                reason: Cow::Owned("Room already started innit bruv".to_string()),
+                            }))
+                            .await
+                            .unwrap();
                             // when the function finishes running, the game_session object
                             // should automatically get dropped once out of scope
                         }
@@ -191,7 +204,8 @@ pub async fn handle_request(
                 *res.version_mut() = ver;
                 res.headers_mut().append(CONNECTION, upgrade);
                 res.headers_mut().append(UPGRADE, websocket);
-                res.headers_mut().append(SEC_WEBSOCKET_ACCEPT, derived.unwrap().parse().unwrap());
+                res.headers_mut()
+                    .append(SEC_WEBSOCKET_ACCEPT, derived.unwrap().parse().unwrap());
                 return Ok(res);
             }
         }
@@ -202,14 +216,25 @@ pub async fn handle_request(
                     let mut game_session = session::GameSession {
                         rooms,
                         addr,
-                        username: queries.get("username").unwrap_or(&"balls_eater".to_string()).to_string(),
-                        skin: queries.get("skin").unwrap_or(&"0".to_string()).parse::<u8>().unwrap(),
-                        seed: (*queries.get("seed").unwrap_or(&"0".to_string())).parse().unwrap_or(0),
+                        username: queries
+                            .get("username")
+                            .unwrap_or(&"balls_eater".to_string())
+                            .to_string(),
+                        skin: queries
+                            .get("skin")
+                            .unwrap_or(&"0".to_string())
+                            .parse::<u8>()
+                            .unwrap(),
+                        seed: (*queries.get("seed").unwrap_or(&"0".to_string()))
+                            .parse()
+                            .unwrap_or(0),
                         room: room.clone(),
                         // id will be calculated
-                        id: None
+                        id: None,
                     };
-                    game_session.start(WebSocketStream::from_raw_socket(upgraded, Role::Server, None).await).await;
+                    game_session
+                        .start(WebSocketStream::from_raw_socket(upgraded, Role::Server, None).await)
+                        .await;
                     // when the function finishes running, the game_session object
                     // should automatically get dropped once out of scope
                 }
@@ -221,7 +246,8 @@ pub async fn handle_request(
         *res.version_mut() = ver;
         res.headers_mut().append(CONNECTION, upgrade);
         res.headers_mut().append(UPGRADE, websocket);
-        res.headers_mut().append(SEC_WEBSOCKET_ACCEPT, derived.unwrap().parse().unwrap());
+        res.headers_mut()
+            .append(SEC_WEBSOCKET_ACCEPT, derived.unwrap().parse().unwrap());
         // Let's add an additional header to our response to the client.
         // res.headers_mut().append("MyCustomHeader", ":)".parse().unwrap());
         // res.headers_mut().append("SOME_TUNGSTENITE_HEADER", "header_value".parse().unwrap());
@@ -235,11 +261,14 @@ pub async fn handle_request(
         tokio::task::spawn(async move {
             match hyper::upgrade::on(&mut req).await {
                 Ok(upgraded) => {
-                    let mut ws = WebSocketStream::from_raw_socket(upgraded, Role::Server, None).await;
+                    let mut ws =
+                        WebSocketStream::from_raw_socket(upgraded, Role::Server, None).await;
                     ws.close(Some(CloseFrame {
                         code: CloseCode::Invalid,
-                        reason: Cow::Owned("You're gay".to_string())
-                    })).await.unwrap();
+                        reason: Cow::Owned("You're gay".to_string()),
+                    }))
+                    .await
+                    .unwrap();
                     // when the function finishes running, the game_session object
                     // should automatically get dropped once out of scope
                 }
@@ -251,7 +280,8 @@ pub async fn handle_request(
         *res.version_mut() = ver;
         res.headers_mut().append(CONNECTION, upgrade);
         res.headers_mut().append(UPGRADE, websocket);
-        res.headers_mut().append(SEC_WEBSOCKET_ACCEPT, derived.unwrap().parse().unwrap());
+        res.headers_mut()
+            .append(SEC_WEBSOCKET_ACCEPT, derived.unwrap().parse().unwrap());
         Ok(res)
     }
 }
