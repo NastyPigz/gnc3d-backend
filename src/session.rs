@@ -66,6 +66,8 @@ impl GameSession {
                             } else {
                                 results.push(Ok(recp));
                             }
+                        } else {
+                            results.push(Ok(recp));
                         }
                     }
                     // no need to do stuff like sending close events, the "disconnect" f'n would've been called already
